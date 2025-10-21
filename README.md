@@ -20,6 +20,49 @@ To run this project, you will need:
 * [Docker](https://docs.docker.com/get-docker/)  
 * [Docker Compose](https://docs.docker.com/compose/install/)
 
+## **Project Structure**
+```bash
+.  
+├── cmd/server/main.go       # Entrypoint, flag parsing, server setup  
+├── internal/  
+│   ├── api/http.go          # All HTTP handlers and routing  
+│   ├── cluster/node.go      # Structs for NodeConfig, Role, Mode  
+│   ├── repl/repl.go         # Replication client logic  
+│   └── store/store.go       # Thread-safe in-memory KV store  
+├── Dockerfile               # Multi-stage Docker build  
+├── docker-compose.yml       # 3-node cluster definition  
+└── go.mod  
+```
+
+## **Architecture & Data Flow**
+#### Synchronous Replication
+In synchronous replication, the leader does not consider a write operation successful until all the followers have confirmed that it has received and applied the change. This means that the data is guaranteed to be available on all the followers as soon as the leader acknowledges the write, ensuring that all replicas are consistent at that moment.
+![Synchronous Replication](images/sync.png)
+
+#### Asynchronous Replication
+In contrast, asynchronous replication allows the leader to write data and immediately confirm the write to the client without waiting for the followers to process the data. The leader sends the changes to the followers, but it does not wait for an acknowledgment. The followers eventually receive the data and update their copies, but there may be a delay between the time the leader writes the data and the time the follower applies it.
+![Asynchronous Replication](images/async.png)
+
+## **API Endpoints**
+
+#### **Client API**
+
+* **POST /put**: Write a key-value pair (Leader only).  
+  * Body: `{"key": "my-key", "value": "my-value"}`  
+* **GET /get**: Read a key (Leader or Follower).  
+  * Query: `?key=my-key`
+
+#### **Internal Cluster API**
+
+* **POST /replicate**: Used by the leader to send writes to followers (Follower only).
+
+#### **Admin API**
+
+* **GET /status**: Returns the node's ID, role, mode, peers, and all data.  
+* **POST /partition**: Simulates a network partition (Leader only).  
+  * `?block=http://peer-url`: Block replication to this peer.  
+  * `?unblock=http://peer-url`: Unblock replication to this peer.
+
 ## **Running the Project with Docker**
 
 The easiest way to run the full 3-node cluster (1 leader, 2 followers) is with Docker Compose.
@@ -47,7 +90,7 @@ The easiest way to run the full 3-node cluster (1 leader, 2 followers) is with D
 
 All curl commands below should be run from your local terminal. The leader is available on port `8080`, and the two followers are on `8081` and `8082`. Using a tool like `jq` to pretty-print JSON is recommended.
 
-### **1. Check Node Status**
+#### **1. Check Node Status**
 
 First, let's verify that all three nodes are running correctly.
 
@@ -90,7 +133,7 @@ curl http://localhost:8081/status | jq
 }
 ```
 
-### **2. Write Data (Sync Replication)**
+#### **2. Write Data (Sync Replication)**
 
 Let's write a key city to the leader. The cluster is in sync mode by default, so this request will only complete after the data is written to both followers.
 ```bash
@@ -104,7 +147,7 @@ curl -X POST -H "Content-Type: application/json" \
 {"status":"ok","mode":"sync","req_id":"..."}
 ```
 
-### **3. Read Data**
+#### **3. Read Data**
 
 The write is now present on the leader and has been synchronously replicated. You can read the value from any node.
 
@@ -129,7 +172,7 @@ curl "http://localhost:8081/get?key=city" | jq
 
 The output will be the same as the leader's.
 
-### **4. Simulate a Network Partition**
+#### **4. Simulate a Network Partition**
 
 Now for the interesting part. Let's tell the leader to "block" all replication attempts to `follower1`.
 ```bash
@@ -148,7 +191,7 @@ curl http://localhost:8080/status | jq .blocked
 }
 ```
 
-### **5. Write During a Partition**
+#### **5. Write During a Partition**
 
 Let's write a new key, weather. Because the leader is in sync mode and cannot reach `follower1`, this request will **hang** until the 5-second HTTP client timeout is reached. After the timeout, the leader gives up on the blocked peer and completes the request.
 ```bash
@@ -174,7 +217,7 @@ curl -X POST -H "Content-Type: application/json" \
   curl "http://localhost:8081/get?key=weather"
   ```  
 
-### **6. Heal the Partition**
+#### **6. Heal the Partition**
 
 Let's remove the block to "heal" the partition.
 ```bash
@@ -194,37 +237,3 @@ Now, check `follower1`. It has received the *new* write and is now consistent fo
 ```bash
 curl "http://localhost:8081/get?key=weather" | jq .value  
 ```
-
-## **API Endpoints**
-
-### **Client API**
-
-* **POST /put**: Write a key-value pair (Leader only).  
-  * Body: `{"key": "my-key", "value": "my-value"}`  
-* **GET /get**: Read a key (Leader or Follower).  
-  * Query: `?key=my-key`
-
-### **Internal Cluster API**
-
-* **POST /replicate**: Used by the leader to send writes to followers (Follower only).
-
-### **Admin API**
-
-* **GET /status**: Returns the node's ID, role, mode, peers, and all data.  
-* **POST /partition**: Simulates a network partition (Leader only).  
-  * `?block=http://peer-url`: Block replication to this peer.  
-  * `?unblock=http://peer-url`: Unblock replication to this peer.
-
-## **Project Structure**
-```bash
-.  
-├── cmd/server/main.go       # Entrypoint, flag parsing, server setup  
-├── internal/  
-│   ├── api/http.go          # All HTTP handlers and routing  
-│   ├── cluster/node.go      # Structs for NodeConfig, Role, Mode  
-│   ├── repl/repl.go         # Replication client logic  
-│   └── store/store.go       # Thread-safe in-memory KV store  
-├── Dockerfile               # Multi-stage Docker build  
-├── docker-compose.yml       # 3-node cluster definition  
-└── go.mod  
-````
