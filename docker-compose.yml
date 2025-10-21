@@ -1,0 +1,58 @@
+# Define the docker-compose version
+services:
+  # The Leader Node
+  leader:
+    build: . # Build the image from the Dockerfile in the current directory
+    container_name: leader
+    command:
+      [
+        "-id",
+        "leader-1",
+        "-role",
+        "leader",
+        "-mode",
+        "sync",
+        "-port",
+        "8080",
+        "-peers",
+        # Peers are referenced by their service names.
+        # Docker's internal DNS will resolve "follower1" to its container IP.
+        "http://follower1:8081,http://follower2:8082",
+      ]
+    ports:
+      - "8080:8080" # Map host port 8080 to container port 8080
+
+  # The First Follower
+  follower1:
+    build: .
+    container_name: follower1
+    command:
+      [
+        "-id",
+        "follower-1",
+        "-role",
+        "follower",
+        "-port",
+        "8081",
+      ]
+    ports:
+      - "8081:8081" # Map host port 8081 to container port 8081
+
+  # The Second Follower
+  follower2:
+    build: .
+    container_name: follower2
+    command:
+      [
+        "-id",
+        "follower-2",
+        "-role",
+        "follower",
+        "-port",
+        "8082",
+      ]
+    ports:
+      - "8082:8082" # Map host port 8082 to container port 8082
+
+# All services are automatically placed on a default bridge network
+# which allows them to communicate using their service names (e.g., "leader", "follower1").
